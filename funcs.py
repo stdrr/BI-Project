@@ -2,6 +2,8 @@ import pandas as pd
 import numpy as np
 import networkx as nx
 import markov_clustering as mc
+import imported_code.diamond as diamond
+import sys
 
 
 def human_data(file='data/BIOGRID-ORGANISM-Homo_sapiens-4.4.204.tab3.txt',
@@ -45,6 +47,42 @@ def MCL(human_file, start=18, end=27):
         clusters = mc.get_clusters(result)
         Q = mc.modularity(matrix=result, clusters=clusters)
         print("inflation:", inflation, "modularity:", Q)
+
+
+def DIAMOND(network_file, seed_file, n, alpha=1, out_file='data/first_n_added_nodes_weight_alpha.txt'):
+    """
+    Code taken from https://github.com/dinaghiassian/DIAMOnD.git
+    """
+    # -----------------------------------------------------
+    # Checking for input from the command line:
+    # -----------------------------------------------------
+    #
+    # [0] file providing the network in the form of an edgelist
+    #     (tab-separated table, columns 1 & 2 will be used)
+    #
+    # [1] file with the seed genes (if table contains more than one
+    #     column they must be tab-separated; the first column will be
+    #     used only)
+    #
+    # [2] number of desired iterations
+    #
+    # [3] (optional) seeds weight (integer), default value is 1
+    # [4] (optional) name for the results file
+
+    # check if input style is correct
+    input_list = [network_file, seed_file, n, alpha, out_file] 
+    network_edgelist_file, seeds_file, max_number_of_added_nodes, alpha, outfile_name = diamond.check_input_style(input_list)
+
+    # read the network and the seed genes:
+    G_original, seed_genes = diamond.read_input(network_edgelist_file, seeds_file)
+
+    # run DIAMOnD
+    added_nodes = diamond.DIAMOnD(G_original,
+                          seed_genes,
+                          max_number_of_added_nodes, alpha,
+                          outfile=outfile_name)
+
+    print("\n results have been saved to '%s' \n" % outfile_name) 
 
 
 
