@@ -1,9 +1,12 @@
+from collections import defaultdict
+from networkx.drawing.layout import _process_params
 import pandas as pd
 import numpy as np
 import networkx as nx
 import markov_clustering as mc
 import imported_code.diamond as diamond
 from sklearn.preprocessing import normalize
+from sklearn.model_selection import KFold
 
 
 def human_data(file='data/BIOGRID-ORGANISM-Homo_sapiens-4.4.204.tab3.txt',
@@ -257,6 +260,7 @@ def DiaBLE(G_original, seed_genes, max_number_of_added_nodes, alpha, outfile=Non
                                                     disease_genes,
                                                     max_number_of_added_nodes, alpha)
     # 3. saving the results
+    node_ids = []
     with open(outfile, 'w') as fout:
 
         fout.write('\t'.join(['#rank', 'DiaBLE_node', 'p_hyper']) + '\n')
@@ -265,10 +269,11 @@ def DiaBLE(G_original, seed_genes, max_number_of_added_nodes, alpha, outfile=Non
             rank += 1
             DiaBLE_node = DiaBLE_node_info[0]
             p = float(DiaBLE_node_info[3])
+            node_ids.append(DiaBLE_node)
 
             fout.write('\t'.join(map(str, ([rank, DiaBLE_node, p]))) + '\n')
 
-    return added_nodes
+    return node_ids
 
 
 def DIABLE(network_file, seed_file, n, alpha=1, out_file='data/diable_results.txt'):
@@ -411,3 +416,78 @@ def random_walk_wr(G:nx.Graph, seed_genes, r, score_thr, tol):
     rank = list( zip(range(1,len(sorted_nodes)+1), sorted_nodes, pt_1[sorted_idxs]) )
 
     return rank
+
+
+def k_fold(func, metric_func, k=10, **kwargs):
+    """
+    """
+    # network_file, seed_file
+    network_file = kwargs['network_file']
+    seed_file = kwargs['seed_file']
+    G, seed_genes = read_input(network_file, seed_file)
+
+    # 1. throwing away the seed genes that are not in the network
+    all_genes_in_network = set(G.nodes())
+    seed_genes = set(seed_genes)
+    disease_genes = np.array(list(seed_genes & all_genes_in_network))
+    n = len(disease_genes)
+
+    kfolds = KFold(n_splits=k, shuffle=True) 
+
+    metrics = defaultdict(list)
+
+    for train_idx, test_idx in kfolds.split(disease_genes):
+        out = np.array(func(G, disease_genes[train_idx], **kwargs['func_args']))
+        gt = disease_genes[test_idx]
+        metrics_current_split = metric_func(out, gt, n)
+        for key in metrics_current_split.keys():
+            metrics[key].append(metrics_current_split[key])
+    
+    for metric, values in metrics.items():
+        metrics[metric] = (np.average(values), np.std(values))
+
+    return metrics
+
+
+def precision(pred:np.array, gt:np.array):
+    """
+    """
+    rank_len = np.minimum(len(pred), len(gt))
+    tp_len = len(set(iter(pred)) & set(iter(gt)))
+    return tp_len / rank_len
+
+
+def recall(pred:np.array, gt:np.array):
+    """
+    prediction: np.array
+    ground_truth: np.array
+    """
+    tp = len(set(iter(pred)).intersection(set(iter(gt))))
+    fn = len(set(iter(gt)).difference(set(iter(pred))))
+
+    return tp / (tp+fn)
+
+
+def ndcg(pred:np.array, gt:np.array):
+    """
+    """
+    p = np.minimum(len(pred), len(gt))
+    idcg = np.sum(1 / np.log2(np.arange(2, p+2))) # i + 1
+    intersection = np.isin(pred, gt)
+    dcg = np.sum(1 / np.log2(np.nonzero(intersection)[0] + 2)) # shift the idxs in from [0,M] to [1,M+1], then add +1
+    return dcg / idcg
+
+
+def compute_metrics(pred, gt, n):
+    """
+    """
+    top_pos = (50, n//10, n//4, n//2, n)
+    metrics = {}
+
+    for X in top_pos:
+        metrics[f'precision_at_{X}'] = p = precision(pred[:X], gt)
+        metrics[f'recall_at_{X}'] = r = recall(pred[:X], gt)
+        metrics[f'ndcg_at_k_{X}'] = ndcg(pred[:X], gt)
+        metrics[f'F1-score_at_{X}'] = np.nan_to_num(2 * (p * r) / (p + r))
+
+    return metrics

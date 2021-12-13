@@ -402,6 +402,7 @@ def DIAMOnD(G_original, seed_genes, max_number_of_added_nodes, alpha, outfile=No
                                                      disease_genes,
                                                      max_number_of_added_nodes, alpha)
     # 3. saving the results
+    node_ids = []
     with open(outfile, 'w') as fout:
 
         fout.write('\t'.join(['#rank', 'DIAMOnD_node', 'p_hyper']) + '\n')
@@ -410,7 +411,8 @@ def DIAMOnD(G_original, seed_genes, max_number_of_added_nodes, alpha, outfile=No
             rank += 1
             DIAMOnD_node = DIAMOnD_node_info[0]
             p = float(DIAMOnD_node_info[3])
+            node_ids.append(DIAMOnD_node)
 
             fout.write('\t'.join(map(str, ([rank, DIAMOnD_node, p]))) + '\n')
 
-    return added_nodes
+    return node_ids
