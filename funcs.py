@@ -2,6 +2,9 @@ import pandas as pd
 import numpy as np
 import networkx as nx
 import markov_clustering as mc
+import os
+import re
+from sklearn.metrics import recall_score, precision_score, f1_score, ndcg_score
 
 
 def human_data(file='data/BIOGRID-ORGANISM-Homo_sapiens-4.4.204.tab3.txt',
@@ -35,7 +38,7 @@ def data_overview(human_file, disease_file):
     print('Largest connected component:', lcc.number_of_nodes())
 
 
-def MCL(human_file, start=18, end=27):
+def MCL_hyper(human_file, start=18, end=27):
     interactome_df = pd.read_csv(human_file, sep='\t')
     interactome_g = nx.from_pandas_edgelist(interactome_df, source='Entrez Gene Interactor A',
                                             target='Entrez Gene Interactor B')
@@ -47,4 +50,38 @@ def MCL(human_file, start=18, end=27):
         print("inflation:", inflation, "modularity:", Q)
 
 
+def MCL(human_file, inflation=1.8):
+    interactome_df = pd.read_csv(human_file, sep='\t')
+    interactome_g = nx.from_pandas_edgelist(interactome_df, source='Entrez Gene Interactor A',
+                                            target='Entrez Gene Interactor B')
+    matrix = nx.to_scipy_sparse_matrix(interactome_g)
+    result = mc.run_mcl(matrix, inflation=inflation)
+    clusters = mc.get_clusters(result)
+
+    return clusters
+
+
+def diffusion_heat(path='diffusion_heat/', top=50):
+
+    dict_ = {}
+
+    for i in os.listdir(path):
+        df = pd.read_csv(path + i)
+        df = df[df['diffusion_input'] != 1.0]
+        df.sort_values(by=['diffusion_output_rank'], inplace=True)
+        dict_[re.findall(r'\d+', i)[0]] = df['name'][:top].tolist()
+
+    return dict_
+
+
+def metrics(test_set, ground_truth):
+
+    metrics = {}
+
+    metrics['recall'] = recall_score(ground_truth, test_set, average='samples')
+    metrics['precision'] = precision_score(ground_truth, test_set, average='samples')
+    metrics['f1score'] = f1_score(ground_truth, test_set, average='samples')
+    metrics['ndcg'] = ndcg_score(ground_truth, test_set, average='samples')
+
+    return metrics
 
