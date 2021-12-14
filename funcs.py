@@ -14,6 +14,13 @@ def human_data(file='data/BIOGRID-ORGANISM-Homo_sapiens-4.4.204.tab3.txt',
     our_df = our_df[['Entrez Gene Interactor A', 'Entrez Gene Interactor B']]
     our_df = our_df.drop_duplicates()
     our_df = our_df[our_df['Entrez Gene Interactor A'] != our_df['Entrez Gene Interactor B']]
+    interactome_g = nx.from_pandas_edgelist(our_df, source='Entrez Gene Interactor A',
+                                            target='Entrez Gene Interactor B')
+    list_con_comp = sorted(nx.connected_components(interactome_g), key=len, reverse=True)
+    lcc = interactome_g.subgraph(list_con_comp[0])
+    our_list = nx.to_edgelist(lcc)
+    our_df = pd.DataFrame(our_list, columns=['Entrez Gene Interactor A', 'Entrez Gene Interactor B', 'rem'])
+    our_df = our_df[['Entrez Gene Interactor A', 'Entrez Gene Interactor B']]
     our_df.to_csv(save_file, sep='\t', index=False)
 
 
@@ -84,4 +91,6 @@ def metrics(test_set, ground_truth):
     metrics['ndcg'] = ndcg_score(ground_truth, test_set, average='samples')
 
     return metrics
+
+
 
