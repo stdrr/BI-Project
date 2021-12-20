@@ -4,31 +4,44 @@ import pandas as pd
 import numpy as np
 import networkx as nx
 import markov_clustering as mc
-<<<<<<< HEAD
 import os
 import re
 from sklearn.metrics import recall_score, precision_score, f1_score, ndcg_score
-=======
 import imported_code.diamond as diamond
 from sklearn.preprocessing import normalize
 from sklearn.model_selection import KFold
->>>>>>> main
+from scipy.stats import hypergeom
 
 
+# TODO: For some reason we still don't get the correct results....
 def human_data(file='data/BIOGRID-ORGANISM-Homo_sapiens-4.4.204.tab3.txt',
-               save_file='data/homo_preprocess.tsv'):
+               save_file='data/homo_preprocess.tsv', correct=True):
     df = pd.read_csv(file, sep='\t', low_memory=False)
-    our_df = df[(df['Organism ID Interactor A'] == 9606) & (df['Organism ID Interactor B'] == 9606)]
-    our_df = our_df[['Entrez Gene Interactor A', 'Entrez Gene Interactor B']]
-    our_df = our_df.drop_duplicates()
-    our_df = our_df[our_df['Entrez Gene Interactor A'] != our_df['Entrez Gene Interactor B']]
-    interactome_g = nx.from_pandas_edgelist(our_df, source='Entrez Gene Interactor A',
-                                            target='Entrez Gene Interactor B')
+    our_df = df[(df['Experimental System Type'] == 'physical') & 
+                (df['Organism ID Interactor A'] == 9606) & 
+                (df['Organism ID Interactor B'] == 9606)]
+    if correct:
+        our_df = our_df[['Official Symbol Interactor A', 'Official Symbol Interactor B']]
+        our_df = our_df.drop_duplicates()
+        our_df = our_df[our_df['Official Symbol Interactor A'] != our_df['Official Symbol Interactor B']]
+        print(len(our_df))
+        print(len(our_df))
+        interactome_g = nx.from_pandas_edgelist(our_df, source='Official Symbol Interactor A',
+                                                target='Official Symbol Interactor B')
+    else:
+        our_df = our_df.drop_duplicates(subset=['Official Symbol Interactor A', 'Official Symbol Interactor B'])
+        our_df = our_df[our_df['Official Symbol Interactor A'] != our_df['Official Symbol Interactor B']]
+        print(len(our_df))
+        print(len(our_df))
+        interactome_g = nx.from_pandas_edgelist(our_df, source='Entrez Gene Interactor A',
+                                                    target='Entrez Gene Interactor B')
+    print('Nodes: ', interactome_g.number_of_nodes())
+    print('Edges: ', interactome_g.number_of_edges())
     list_con_comp = sorted(nx.connected_components(interactome_g), key=len, reverse=True)
     lcc = interactome_g.subgraph(list_con_comp[0])
     our_list = nx.to_edgelist(lcc)
-    our_df = pd.DataFrame(our_list, columns=['Entrez Gene Interactor A', 'Entrez Gene Interactor B', 'rem'])
-    our_df = our_df[['Entrez Gene Interactor A', 'Entrez Gene Interactor B']]
+    our_df = pd.DataFrame(our_list, columns=['A', 'B', 'rem'])
+    our_df = our_df[['A', 'B']]
     our_df.to_csv(save_file, sep='\t', index=False)
 
 
@@ -37,17 +50,22 @@ def disease_data(file='data/curated_gene_disease_associations.tsv',
     df = pd.read_csv(file, sep='\t')
     curated_df = df[df['diseaseId'].str.contains(disease_id)]
     curated_df.to_csv('data/disease'+disease_id+'.tsv', sep='\t', index=False)
+    seeds='data/seeds_'+disease_id+'.txt'
+    textfile = open(seeds, "w")
+    for element in curated_df['geneId'].to_list():
+        textfile.write(str(element) + "\n")
+    textfile.close()
 
 
 def data_overview(human_file, disease_file):
     curated_df = pd.read_csv(disease_file, sep='\t')
     interactome_df = pd.read_csv(human_file, sep='\t')
-    interactome_g = nx.from_pandas_edgelist(interactome_df, source='Entrez Gene Interactor A',
-                                            target='Entrez Gene Interactor B')
+    interactome_g = nx.from_pandas_edgelist(interactome_df, source='A',
+                                            target='B')
     curated_g = interactome_g.subgraph(curated_df['geneId'].to_list())
     list_con_comp = sorted(nx.connected_components(curated_g), key=len, reverse=True)
     lcc = curated_g.subgraph(list_con_comp[0])
-    print('Number of genes associated with the desease:', curated_df['geneId'].nunique())
+    print('Number of genes associated with the disease:', curated_df['geneId'].nunique())
     print('Classes of the desease:', curated_df['diseaseClass'].unique())
     print('Number of genes present in the interactome:', curated_g.number_of_nodes())
     print('Largest connected component:', lcc.number_of_nodes())
@@ -55,8 +73,8 @@ def data_overview(human_file, disease_file):
 
 def MCL_hyper(human_file, start=18, end=27):
     interactome_df = pd.read_csv(human_file, sep='\t')
-    interactome_g = nx.from_pandas_edgelist(interactome_df, source='Entrez Gene Interactor A',
-                                            target='Entrez Gene Interactor B')
+    interactome_g = nx.from_pandas_edgelist(interactome_df, source='A',
+                                            target='B')
     matrix = nx.to_scipy_sparse_matrix(interactome_g)
     for inflation in [i / 10 for i in range(start, end)]:
         result = mc.run_mcl(matrix, inflation=inflation)
@@ -65,11 +83,10 @@ def MCL_hyper(human_file, start=18, end=27):
         print("inflation:", inflation, "modularity:", Q)
 
 
-<<<<<<< HEAD
 def MCL(human_file, inflation=1.8):
     interactome_df = pd.read_csv(human_file, sep='\t')
-    interactome_g = nx.from_pandas_edgelist(interactome_df, source='Entrez Gene Interactor A',
-                                            target='Entrez Gene Interactor B')
+    interactome_g = nx.from_pandas_edgelist(interactome_df, source='A',
+                                            target='B')
     matrix = nx.to_scipy_sparse_matrix(interactome_g)
     result = mc.run_mcl(matrix, inflation=inflation)
     clusters = mc.get_clusters(result)
@@ -77,36 +94,65 @@ def MCL(human_file, inflation=1.8):
     return clusters
 
 
-def diffusion_heat(path='diffusion_heat/', top=50):
+def enriched_cluster(human_file, clusters, train_genes):
+    """
+    Given the graph, the clusters from the MCL output, and with a set of probe genes, return the enriched clusters
+    """
+    interactome_df = pd.read_csv(human_file, sep='\t')
+    interactome_g = nx.from_pandas_edgelist(interactome_df, source='A',
+                                            target='B')
+    
+    M = interactome_g.number_of_nodes()
+    n = len(train_genes)
+
+    enriched = []
+    for cluster in clusters:
+        N = len(cluster)
+        k = len(set(train_genes).intersection(cluster))
+        p_val = hypergeom.cdf(M=M, n=n, N=N, k=k)
+        if p_val <= 0.05:
+            enriched.append([*cluster])
+
+    print('Number of clusters:', len(enriched))
+    return list(set([item for sublist in enriched for item in sublist]))
+
+
+def split_files_diffusion_heat(seeds='data/seed.txt', disease='C0003873', k=10):
+
+    with open(seeds, 'r') as f:
+        myNames = [line.strip() for line in f]
+    for i in range(k):
+        v = myNames[round((len(myNames)/k)*(i)):round((len(myNames)/k)*(i+1))]
+        t = set(myNames).difference(myNames[round((len(myNames)/k)*(i)):round((len(myNames)/k)*(i+1))])
+
+        txt_file_tr = open("diffusion_heat/"+disease+"/seed"+str(i+1)+"tr.txt", "w")
+        for element in t:
+            txt_file_tr.write(str(element) + "\n")
+        txt_file_tr.close()
+        
+        txt_file_val = open("diffusion_heat/"+disease+"/seed"+str(i+1)+"val.txt", "w")
+        for element in t:
+            txt_file_val.write(str(element) + "\n")
+        txt_file_val.close()
+    
+
+def diffusion_heat(path='diffusion_heat/'):
 
     dict_ = {}
 
     for i in os.listdir(path):
-        df = pd.read_csv(path + i)
-        df = df[df['diffusion_input'] != 1.0]
-        df.sort_values(by=['diffusion_output_rank'], inplace=True)
-        dict_[re.findall(r'\d+', i)[0]] = df['name'][:top].tolist()
+        if i.endswith(".csv"):
+            df = pd.read_csv(path + i)
+            df = df[df['diffusion_input'] != 1.0]
+            df.sort_values(by=['diffusion_output_rank'], inplace=True)
+            dict_[re.findall(r'\d+', i)[0]] = df['name'].tolist()
 
     return dict_
 
 
-def metrics(test_set, ground_truth):
-
-    metrics = {}
-
-    metrics['recall'] = recall_score(ground_truth, test_set, average='samples')
-    metrics['precision'] = precision_score(ground_truth, test_set, average='samples')
-    metrics['f1score'] = f1_score(ground_truth, test_set, average='samples')
-    metrics['ndcg'] = ndcg_score(ground_truth, test_set, average='samples')
-
-    return metrics
-
-
-=======
 def DIAMOND(network_file, seed_file, n, alpha=1, out_file='data/first_n_added_nodes_weight_alpha.txt'):
     """
     Code taken and adapted from https://github.com/dinaghiassian/DIAMOnD.git
->>>>>>> main
 
     :param network_file: file providing the network in the form of an edgelist
     :param seed_file: file with the seed genes (if table contains more than one
@@ -499,6 +545,55 @@ def k_fold(func, metric_func, k=10, **kwargs):
         metrics[metric] = (np.average(values), np.std(values))
 
     return metrics
+
+
+def k_fold_MCL(human_file, seed_file,  metric_func, k=10, inflation=1.8):
+    """
+    """
+
+    clusters = MCL(human_file=human_file, inflation=inflation)
+    seeds = pd.read_csv(seed_file, header=None, dtype=str).iloc[:,0].tolist()
+
+    kfolds = KFold(n_splits=k, shuffle=True) 
+    n = len(seeds)
+
+    metrics = defaultdict(list)
+
+    for train_idx, test_idx in kfolds.split(seeds):
+        train_genes = [int(seeds[i]) for i in train_idx]
+        out = enriched_cluster(human_file=human_file, 
+                            clusters=clusters, 
+                            train_genes=train_genes)
+        gt = [int(seeds[i]) for i in test_idx]
+        metrics_current_split = metric_func(out, gt, n)
+        for key in metrics_current_split.keys():
+            metrics[key].append(metrics_current_split[key])
+    
+    for metric, values in metrics.items():
+        metrics[metric] = (np.average(values), np.std(values))
+
+    return metrics
+
+
+def k_fold_diffusion_heat(dict_res, metric_func, n=174, disease='C0003873'):
+    """
+    """
+
+    metrics = defaultdict(list)
+
+    for key, value in dict_res.items():
+        out = value
+        gt = pd.read_csv('diffusion_heat/'+disease+'/seed'+key+'val.txt', header=None, dtype=str).iloc[:,0].tolist()
+
+        metrics_current_split = metric_func(out, gt, n)
+        for key in metrics_current_split.keys():
+            metrics[key].append(metrics_current_split[key])
+
+    for metric, values in metrics.items():
+        metrics[metric] = (np.average(values), np.std(values))
+
+    return metrics
+
 
 
 def precision(pred:np.array, gt:np.array):
