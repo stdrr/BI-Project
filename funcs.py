@@ -13,28 +13,35 @@ from sklearn.model_selection import KFold
 from scipy.stats import hypergeom
 
 
-# TODO: For some reason we still don't get the correct results....
+def check_issue(file='data/BIOGRID-ORGANISM-Homo_sapiens-4.4.204.tab3.txt'):
+    """
+    We found an inconsistency in the Entrez Gene Interactor B column with Official Symbol Interactor B which will be fixed manually
+    """
+    df = pd.read_csv('data/BIOGRID-ORGANISM-Homo_sapiens-4.4.204.tab3.txt', sep='\t', low_memory=False)
+    our_df = df[(df['Experimental System Type'] == 'physical') & 
+            (df['Organism ID Interactor A'] == 9606) & 
+            (df['Organism ID Interactor B'] == 9606)]
+    t = our_df.groupby('Official Symbol Interactor B')['Entrez Gene Interactor B'].nunique()
+    t = t[t > 1]
+    print(t)
+
 def human_data(file='data/BIOGRID-ORGANISM-Homo_sapiens-4.4.204.tab3.txt',
                save_file='data/homo_preprocess.tsv', correct=True):
     df = pd.read_csv(file, sep='\t', low_memory=False)
     our_df = df[(df['Experimental System Type'] == 'physical') & 
                 (df['Organism ID Interactor A'] == 9606) & 
                 (df['Organism ID Interactor B'] == 9606)]
-    if correct:
-        our_df = our_df[['Official Symbol Interactor A', 'Official Symbol Interactor B']]
-        our_df = our_df.drop_duplicates()
-        our_df = our_df[our_df['Official Symbol Interactor A'] != our_df['Official Symbol Interactor B']]
-        print(len(our_df))
-        print(len(our_df))
-        interactome_g = nx.from_pandas_edgelist(our_df, source='Official Symbol Interactor A',
-                                                target='Official Symbol Interactor B')
-    else:
-        our_df = our_df.drop_duplicates(subset=['Official Symbol Interactor A', 'Official Symbol Interactor B'])
-        our_df = our_df[our_df['Official Symbol Interactor A'] != our_df['Official Symbol Interactor B']]
-        print(len(our_df))
-        print(len(our_df))
-        interactome_g = nx.from_pandas_edgelist(our_df, source='Entrez Gene Interactor A',
-                                                    target='Entrez Gene Interactor B')
+    our_df = our_df.drop_duplicates(subset=['Official Symbol Interactor A', 'Official Symbol Interactor B'])
+    our_df = our_df[our_df['Official Symbol Interactor A'] != our_df['Official Symbol Interactor B']]
+    # Small fixes in order to correct minor issue with Entrez Gene Interactor found
+    our_df.loc[(our_df['Official Symbol Interactor B'] == 'RNR1') & 
+                (our_df['Entrez Gene Interactor B'] == '4549'), 
+                'Entrez Gene Interactor B'] = '6052'
+    our_df.loc[(our_df['Official Symbol Interactor B'] == 'MEMO1') & 
+               (our_df['Entrez Gene Interactor B'] == '7795'), 
+               'Entrez Gene Interactor B'] = '51072'
+    interactome_g = nx.from_pandas_edgelist(our_df, source='Entrez Gene Interactor A',
+                                                target='Entrez Gene Interactor B')
     print('Nodes: ', interactome_g.number_of_nodes())
     print('Edges: ', interactome_g.number_of_edges())
     list_con_comp = sorted(nx.connected_components(interactome_g), key=len, reverse=True)
