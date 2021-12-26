@@ -11,7 +11,27 @@ import imported_code.diamond as diamond
 from sklearn.preprocessing import normalize
 from sklearn.model_selection import KFold
 from scipy.stats import hypergeom
+import csv
 
+
+def tsv_to_txt(tsv_file, txt_file):
+  
+    # Open tsv and txt files(open txt file in write mode)
+    tsv_file = open(tsv_file)
+    txt_file = open(txt_file, "w")
+    
+    # Read tsv file and use delimiter as \t. csv.reader
+    # function retruns a iterator
+    # which is stored in read_csv
+    read_tsv = csv.reader(tsv_file, delimiter="\t")
+    
+    # write data in txt file line by line
+    for row in read_tsv:
+        joined_string = "\t".join(row)
+        txt_file.writelines(joined_string+'\n')
+    
+    # close files
+    txt_file.close()
 
 def check_issue(file='data/BIOGRID-ORGANISM-Homo_sapiens-4.4.204.tab3.txt'):
     """
@@ -130,7 +150,7 @@ def split_files_diffusion_heat(seeds='data/seed.txt', disease='C0003873', k=10):
         myNames = [line.strip() for line in f]
     for i in range(k):
         v = myNames[round((len(myNames)/k)*(i)):round((len(myNames)/k)*(i+1))]
-        t = set(myNames).difference(myNames[round((len(myNames)/k)*(i)):round((len(myNames)/k)*(i+1))])
+        t = list(set(myNames).difference(myNames[round((len(myNames)/k)*(i)):round((len(myNames)/k)*(i+1))]))
 
         txt_file_tr = open("diffusion_heat/"+disease+"/seed"+str(i+1)+"tr.txt", "w")
         for element in t:
@@ -138,7 +158,7 @@ def split_files_diffusion_heat(seeds='data/seed.txt', disease='C0003873', k=10):
         txt_file_tr.close()
         
         txt_file_val = open("diffusion_heat/"+disease+"/seed"+str(i+1)+"val.txt", "w")
-        for element in t:
+        for element in v:
             txt_file_val.write(str(element) + "\n")
         txt_file_val.close()
     
