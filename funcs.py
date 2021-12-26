@@ -10,20 +10,25 @@ from sklearn.model_selection import KFold
 
 
 def human_data(file='data/BIOGRID-ORGANISM-Homo_sapiens-4.4.204.tab3.txt',
-               save_file='data/homo_preprocess.tsv'):
+               save_file='data/processed/homo_preprocess.tsv'):
     df = pd.read_csv(file, sep='\t', low_memory=False)
     our_df = df[(df['Organism ID Interactor A'] == 9606) & (df['Organism ID Interactor B'] == 9606)]
     our_df = our_df[['Entrez Gene Interactor A', 'Entrez Gene Interactor B']]
     our_df = our_df.drop_duplicates()
     our_df = our_df[our_df['Entrez Gene Interactor A'] != our_df['Entrez Gene Interactor B']]
-    our_df.to_csv(save_file, sep='\t', index=False)
+    interactome_g = nx.from_pandas_edgelist(our_df, source='Entrez Gene Interactor A',
+                                            target='Entrez Gene Interactor B')
+    list_con_comp = sorted(nx.connected_components(interactome_g), key=len, reverse=True)
+    lcc = interactome_g.subgraph(list_con_comp[0])
+    lcc_interactome_df = nx.to_pandas_edgelist(lcc, source='Entrez Gene Interactor A', target='Entrez Gene Interactor B')
+    lcc_interactome_df.to_csv(save_file, sep='\t', index=False)
 
 
 def disease_data(file='data/curated_gene_disease_associations.tsv',
                  disease_id='C0003873'):
     df = pd.read_csv(file, sep='\t')
     curated_df = df[df['diseaseId'].str.contains(disease_id)]
-    curated_df.to_csv('data/disease'+disease_id+'.tsv', sep='\t', index=False)
+    curated_df.to_csv('data/processed/disease'+disease_id+'.tsv', sep='\t', index=False)
 
 
 def data_overview(human_file, disease_file):
@@ -34,10 +39,16 @@ def data_overview(human_file, disease_file):
     curated_g = interactome_g.subgraph(curated_df['geneId'].to_list())
     list_con_comp = sorted(nx.connected_components(curated_g), key=len, reverse=True)
     lcc = curated_g.subgraph(list_con_comp[0])
-    print('Number of genes associated with the desease:', curated_df['geneId'].nunique())
-    print('Classes of the desease:', curated_df['diseaseClass'].unique())
+    print('Number of genes associated with the disease:', curated_df['geneId'].nunique())
+    print('Classes of the disease:', curated_df['diseaseClass'].unique())
     print('Number of genes present in the interactome:', curated_g.number_of_nodes())
     print('Largest connected component:', lcc.number_of_nodes())
+    nodes_in_g = set(interactome_df['Entrez Gene Interactor A'].to_list() + 
+                                interactome_df['Entrez Gene Interactor B'].to_list())
+    seed_genes = set(curated_df['geneId'].to_list())
+    missing_gene = seed_genes.difference(nodes_in_g)
+    print('Number of genes in the interactome:', len(nodes_in_g))
+    print('Missing gene:', missing_gene)
 
 
 def MCL(human_file, start=18, end=27):
@@ -52,7 +63,7 @@ def MCL(human_file, start=18, end=27):
         print("inflation:", inflation, "modularity:", Q)
 
 
-def DIAMOND(network_file, seed_file, n, alpha=1, out_file='data/first_n_added_nodes_weight_alpha.txt'):
+def DIAMOND(network_file, seed_file, n, alpha=1, out_file='data/results/first_n_added_nodes_weight_alpha.txt'):
     """
     Code taken and adapted from https://github.com/dinaghiassian/DIAMOnD.git
 
@@ -276,7 +287,7 @@ def DiaBLE(G_original, seed_genes, max_number_of_added_nodes, alpha, outfile=Non
     return node_ids
 
 
-def DIABLE(network_file, seed_file, n, alpha=1, out_file='data/diable_results.txt'):
+def DIABLE(network_file, seed_file, n, alpha=1, out_file='data/results/diable_results.txt'):
     """
     Implementation of the DiaBLE algorithm based on diamond_iteration_of_first_X_nodes()
     function from https://github.com/dinaghiassian/DIAMOnD.git
@@ -320,7 +331,7 @@ def DIABLE(network_file, seed_file, n, alpha=1, out_file='data/diable_results.tx
 # #
 # #################################################################
 
-def RANDOM_WALK_WITH_RESTART(network_file, seed_file, r, score_thr=0.4, tol=1e-6, out_file='data/random_walk_wr_results.txt'):
+def RANDOM_WALK_WITH_RESTART(network_file, seed_file, r, score_thr=0.4, tol=1e-6, out_file='data/results/random_walk_wr_results.txt'):
     """
     Implementation of the Random Walk With Restart algorithm described in Walking the Interactome
     for Prioritization of Candidate Disease Genes, Sebastian Kohler et al.,
@@ -378,13 +389,13 @@ def read_input(network_file, seed_file):
     return G, seed_genes
 
 
-def random_walk_wr(G:nx.Graph, seed_genes, r, score_thr, tol):
+def random_walk_wr(G:nx.Graph, seed_genes, r, score_thr, tol, sorted_nodes_only=False):
     """
     Core routine for the Random Walk With Restart algorithm.
 
     :param G: interactome graph
     :param seed_genes: disease genes restricted to the interactome
-    :param r: probability of restarting
+    :param r: probability of restarting; default value 0.7
     :param score_thr: probability threshold under which truncate the output rank
     :param tol: tolerance threshold for convergence; in the ref. paper set to 1e-6
 
@@ -413,6 +424,10 @@ def random_walk_wr(G:nx.Graph, seed_genes, r, score_thr, tol):
     
     sorted_idxs = np.argsort(pt_1)[::-1]
     sorted_nodes = [index_to_node[i] for i in sorted_idxs]
+
+    if sorted_nodes_only:
+        return sorted_nodes
+
     rank = list( zip(range(1,len(sorted_nodes)+1), sorted_nodes, pt_1[sorted_idxs]) )
 
     return rank
@@ -444,7 +459,7 @@ def k_fold(func, metric_func, k=10, **kwargs):
             metrics[key].append(metrics_current_split[key])
     
     for metric, values in metrics.items():
-        metrics[metric] = (np.average(values), np.std(values))
+        metrics[metric] = (np.round(np.average(values), 5), np.round(np.std(values), 5))
 
     return metrics
 
