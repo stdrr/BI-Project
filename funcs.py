@@ -11,6 +11,7 @@ import imported_code.diamond as diamond
 from sklearn.preprocessing import normalize
 from sklearn.model_selection import KFold
 from scipy.stats import hypergeom
+import json
 
 
 def check_issue(file='data/BIOGRID-ORGANISM-Homo_sapiens-4.4.204.tab3.txt'):
@@ -76,12 +77,19 @@ def data_overview(human_file, disease_file):
     print('Classes of the disease:', curated_df['diseaseClass'].unique())
     print('Number of genes present in the interactome:', curated_g.number_of_nodes())
     print('Largest connected component:', lcc.number_of_nodes())
-    nodes_in_g = set(interactome_df['Entrez Gene Interactor A'].to_list() + 
-                                interactome_df['Entrez Gene Interactor B'].to_list())
+    nodes_in_g = set(interactome_df['A'].to_list() + 
+                                interactome_df['B'].to_list())
     seed_genes = set(curated_df['geneId'].to_list())
     missing_gene = seed_genes.difference(nodes_in_g)
     print('Number of genes in the interactome:', len(nodes_in_g))
     print('Missing gene:', missing_gene)
+
+
+def generate_PPI(in_file, out_file):
+    """
+    """
+    df = pd.read_csv(in_file, sep='\t')
+    df.to_csv(out_file, sep=',', header=False, index=False)
 
 
 def MCL_hyper(human_file, start=18, end=27):
@@ -163,7 +171,7 @@ def diffusion_heat(path='diffusion_heat/'):
     return dict_
 
 
-def DIAMOND(network_file, seed_file, n, alpha=1, out_file='data/first_n_added_nodes_weight_alpha.txt'):
+def DIAMOND(network_file, seed_file, n, alpha=1, out_file='data/first_n_added_nodes_weight_alpha.txt', return_list=False):
     """
     Code taken and adapted from https://github.com/dinaghiassian/DIAMOnD.git
 
@@ -193,6 +201,9 @@ def DIAMOND(network_file, seed_file, n, alpha=1, out_file='data/first_n_added_no
                           seed_genes,
                           max_number_of_added_nodes, alpha,
                           outfile=outfile_name)
+
+    if return_list:
+        return added_nodes
 
     print("\n results have been saved to '%s' \n" % outfile_name) 
 
@@ -387,7 +398,7 @@ def DiaBLE(G_original, seed_genes, max_number_of_added_nodes, alpha, outfile=Non
     return node_ids
 
 
-def DIABLE(network_file, seed_file, n, alpha=1, out_file='data/results/diable_results.txt'):
+def DIABLE(network_file, seed_file, n, alpha=1, out_file='data/results/diable_results.txt', return_list=False):
     """
     Implementation of the DiaBLE algorithm based on diamond_iteration_of_first_X_nodes()
     function from https://github.com/dinaghiassian/DIAMOnD.git
@@ -420,6 +431,9 @@ def DIABLE(network_file, seed_file, n, alpha=1, out_file='data/results/diable_re
                          seed_genes,
                          max_number_of_added_nodes, alpha,
                          outfile=outfile_name)
+
+    if return_list:
+        return added_nodes
 
     print("\n results have been saved to '%s' \n" % outfile_name) 
 
@@ -533,7 +547,17 @@ def random_walk_wr(G:nx.Graph, seed_genes, r, score_thr, tol, sorted_nodes_only=
     return rank
 
 
-def k_fold(func, metric_func, k=10, **kwargs):
+def get_extended_val(extended_disease_file, disease, extended_val=False):
+    """
+    """
+    if extended_val:
+        ext_df = pd.read_csv(extended_disease_file, sep='\t')
+        ext_set = set(ext_df[ext_df['diseaseId'].str.contains(disease)]['geneId'])
+        return ext_set, set()
+    return None,None
+
+
+def k_fold(func, metric_func, k=5, extended_val=False, **kwargs):
     """
     """
     # network_file, seed_file
@@ -551,15 +575,34 @@ def k_fold(func, metric_func, k=10, **kwargs):
 
     metrics = defaultdict(list)
 
+    ext_disease, extended_val_set = get_extended_val(kwargs['extended_disease_file'], kwargs['disease'], extended_val)
+
     for train_idx, test_idx in kfolds.split(disease_genes):
         out = np.array(func(G, disease_genes[train_idx], **kwargs['func_args']))
         gt = disease_genes[test_idx]
+
+        if extended_val:
+            fp = set(iter(out[:50])) - set(iter(gt))
+            fp_in_ext = fp & ext_disease
+            extended_val_set |= fp_in_ext
+            gt = np.concatenate([gt, np.array(list(fp_in_ext))])
+
         metrics_current_split = metric_func(out, gt, n)
         for key in metrics_current_split.keys():
             metrics[key].append(metrics_current_split[key])
     
     for metric, values in metrics.items():
         metrics[metric] = (np.round(np.average(values), 5), np.round(np.std(values), 5))
+
+    if extended_val:
+        metrics['extended_val'] = list(extended_val_set)
+
+    if os.path.exists('./data/results/kfold_tmp.txt'):
+        os.remove('./data/results/kfold_tmp.txt')
+
+    if 'metrics_file' in kwargs:
+        with open(kwargs['metrics_file'], 'w') as metrics_file:
+            json.dump(metrics, metrics_file)
 
     return metrics
 
@@ -612,11 +655,10 @@ def k_fold_diffusion_heat(dict_res, metric_func, n=174, disease='C0003873'):
     return metrics
 
 
-
 def precision(pred:np.array, gt:np.array):
     """
     """
-    rank_len = np.minimum(len(pred), len(gt))
+    rank_len = len(pred)
     tp_len = len(set(iter(pred)) & set(iter(gt)))
     return tp_len / rank_len
 
@@ -626,10 +668,9 @@ def recall(pred:np.array, gt:np.array):
     prediction: np.array
     ground_truth: np.array
     """
+    gt_len = len(gt)
     tp = len(set(iter(pred)).intersection(set(iter(gt))))
-    fn = len(set(iter(gt)).difference(set(iter(pred))))
-
-    return tp / (tp+fn)
+    return tp / gt_len
 
 
 def ndcg(pred:np.array, gt:np.array):
@@ -652,6 +693,6 @@ def compute_metrics(pred, gt, n):
         metrics[f'precision_at_{X}'] = p = precision(pred[:X], gt)
         metrics[f'recall_at_{X}'] = r = recall(pred[:X], gt)
         metrics[f'ndcg_at_k_{X}'] = ndcg(pred[:X], gt)
-        metrics[f'F1-score_at_{X}'] = np.nan_to_num(2 * (p * r) / (p + r))
+        metrics[f'F1-score_at_{X}'] = 0 if (p+r) == 0 else 2 * (p*r) / (p+r)
 
     return metrics
