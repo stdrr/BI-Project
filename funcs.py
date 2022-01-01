@@ -57,8 +57,14 @@ def disease_data(file='data/curated_gene_disease_associations.tsv',
                  disease_id='C0003873'):
     df = pd.read_csv(file, sep='\t')
     curated_df = df[df['diseaseId'].str.contains(disease_id)]
-    curated_df.to_csv('data/disease'+disease_id+'.tsv', sep='\t', index=False)
-    seeds='data/seeds_'+disease_id+'.txt'
+
+    if not os.path.exists(f'data/{disease_id}'):
+        os.mkdir(f'data/{disease_id}')
+
+    save_file = f'data/{disease_id}/disease{disease_id}.tsv'
+
+    curated_df.to_csv(save_file, sep='\t', index=False)
+    seeds = f'data/{disease_id}/seeds_{disease_id}.txt'
     textfile = open(seeds, "w")
     for element in curated_df['geneId'].to_list():
         textfile.write(str(element) + "\n")
@@ -582,7 +588,7 @@ def k_fold(func, metric_func, k=5, extended_val=False, **kwargs):
         gt = disease_genes[test_idx]
 
         if extended_val:
-            fp = set(iter(out[:50])) - set(iter(gt))
+            fp = set(iter(out[:n])) - set(iter(gt))
             fp_in_ext = fp & ext_disease
             extended_val_set |= fp_in_ext
             gt = np.concatenate([gt, np.array(list(fp_in_ext))])
