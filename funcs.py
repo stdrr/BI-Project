@@ -537,7 +537,7 @@ def random_walk_wr(G:nx.Graph, seed_genes, r, score_thr, tol, sorted_nodes_only=
     pt_1 = pt_1[pt_1 >= score_thr]
     
     sorted_idxs = np.argsort(pt_1)[::-1]
-    sorted_nodes = [index_to_node[i] for i in sorted_idxs]
+    sorted_nodes = [index_to_node[i] for i in sorted_idxs if index_to_node[i] not in seed_genes]
 
     if sorted_nodes_only:
         return sorted_nodes
@@ -602,7 +602,7 @@ def k_fold(func, metric_func, k=5, extended_val=False, **kwargs):
 
     if 'metrics_file' in kwargs:
         with open(kwargs['metrics_file'], 'w') as metrics_file:
-            json.dump(metrics, metrics_file)
+            json.dump(metrics, metrics_file, indent=4)
 
     return metrics
 
