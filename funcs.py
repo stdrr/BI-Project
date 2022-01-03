@@ -698,7 +698,7 @@ def compute_metrics(pred, gt, n):
     for X in top_pos:
         metrics[f'precision_at_{X}'] = p = precision(pred[:X], gt)
         metrics[f'recall_at_{X}'] = r = recall(pred[:X], gt)
-        metrics[f'ndcg_at_k_{X}'] = ndcg(pred[:X], gt)
+        metrics[f'ndcg_at_{X}'] = ndcg(pred[:X], gt)
         metrics[f'F1-score_at_{X}'] = 0 if (p+r) == 0 else 2 * (p*r) / (p+r)
 
     return metrics
