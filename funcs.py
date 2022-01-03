@@ -558,7 +558,7 @@ def get_extended_val(extended_disease_file, disease, extended_val=False):
     """
     if extended_val:
         ext_df = pd.read_csv(extended_disease_file, sep='\t')
-        ext_set = set(ext_df[ext_df['diseaseId'].str.contains(disease)]['geneId'])
+        ext_set = set(ext_df[ext_df['diseaseId'].str.contains(disease)]['geneId'].astype(str))
         return ext_set, set()
     return None,None
 
@@ -577,7 +577,7 @@ def k_fold(func, metric_func, k=5, extended_val=False, **kwargs):
     disease_genes = np.array(list(seed_genes & all_genes_in_network))
     n = len(disease_genes)
 
-    kfolds = KFold(n_splits=k, shuffle=True) 
+    kfolds = KFold(n_splits=k, shuffle=True, random_state=1960500) 
 
     metrics = defaultdict(list)
 
