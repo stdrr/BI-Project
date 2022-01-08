@@ -12,6 +12,7 @@ from sklearn.preprocessing import normalize
 from sklearn.model_selection import KFold
 from scipy.stats import hypergeom
 import csv
+import json
 
 
 def tsv_to_txt(tsv_file, txt_file):
@@ -76,8 +77,14 @@ def disease_data(file='data/curated_gene_disease_associations.tsv',
                  disease_id='C0003873'):
     df = pd.read_csv(file, sep='\t')
     curated_df = df[df['diseaseId'].str.contains(disease_id)]
-    curated_df.to_csv('data/disease'+disease_id+'.tsv', sep='\t', index=False)
-    seeds='data/seeds_'+disease_id+'.txt'
+
+    if not os.path.exists(f'data/{disease_id}'):
+        os.mkdir(f'data/{disease_id}')
+
+    save_file = f'data/{disease_id}/disease{disease_id}.tsv'
+
+    curated_df.to_csv(save_file, sep='\t', index=False)
+    seeds = f'data/{disease_id}/seeds_{disease_id}.txt'
     textfile = open(seeds, "w")
     for element in curated_df['geneId'].to_list():
         textfile.write(str(element) + "\n")
@@ -93,9 +100,22 @@ def data_overview(human_file, disease_file):
     list_con_comp = sorted(nx.connected_components(curated_g), key=len, reverse=True)
     lcc = curated_g.subgraph(list_con_comp[0])
     print('Number of genes associated with the disease:', curated_df['geneId'].nunique())
-    print('Classes of the desease:', curated_df['diseaseClass'].unique())
+    print('Classes of the disease:', curated_df['diseaseClass'].unique())
     print('Number of genes present in the interactome:', curated_g.number_of_nodes())
     print('Largest connected component:', lcc.number_of_nodes())
+    nodes_in_g = set(interactome_df['A'].to_list() + 
+                                interactome_df['B'].to_list())
+    seed_genes = set(curated_df['geneId'].to_list())
+    missing_gene = seed_genes.difference(nodes_in_g)
+    print('Number of genes in the interactome:', len(nodes_in_g))
+    print('Missing gene:', missing_gene)
+
+
+def generate_PPI(in_file, out_file):
+    """
+    """
+    df = pd.read_csv(in_file, sep='\t')
+    df.to_csv(out_file, sep=',', header=False, index=False)
 
 
 def MCL_hyper(human_file, start=18, end=27):
@@ -177,7 +197,7 @@ def diffusion_heat(path='diffusion_heat/'):
     return dict_
 
 
-def DIAMOND(network_file, seed_file, n, alpha=1, out_file='data/first_n_added_nodes_weight_alpha.txt'):
+def DIAMOND(network_file, seed_file, n, alpha=1, out_file='data/first_n_added_nodes_weight_alpha.txt', return_list=False):
     """
     Code taken and adapted from https://github.com/dinaghiassian/DIAMOnD.git
 
@@ -207,6 +227,9 @@ def DIAMOND(network_file, seed_file, n, alpha=1, out_file='data/first_n_added_no
                           seed_genes,
                           max_number_of_added_nodes, alpha,
                           outfile=outfile_name)
+
+    if return_list:
+        return added_nodes
 
     print("\n results have been saved to '%s' \n" % outfile_name) 
 
@@ -401,7 +424,7 @@ def DiaBLE(G_original, seed_genes, max_number_of_added_nodes, alpha, outfile=Non
     return node_ids
 
 
-def DIABLE(network_file, seed_file, n, alpha=1, out_file='data/diable_results.txt'):
+def DIABLE(network_file, seed_file, n, alpha=1, out_file='data/results/diable_results.txt', return_list=False):
     """
     Implementation of the DiaBLE algorithm based on diamond_iteration_of_first_X_nodes()
     function from https://github.com/dinaghiassian/DIAMOnD.git
@@ -435,6 +458,9 @@ def DIABLE(network_file, seed_file, n, alpha=1, out_file='data/diable_results.tx
                          max_number_of_added_nodes, alpha,
                          outfile=outfile_name)
 
+    if return_list:
+        return added_nodes
+
     print("\n results have been saved to '%s' \n" % outfile_name) 
 
 
@@ -445,7 +471,7 @@ def DIABLE(network_file, seed_file, n, alpha=1, out_file='data/diable_results.tx
 # #
 # #################################################################
 
-def RANDOM_WALK_WITH_RESTART(network_file, seed_file, r, score_thr=0.4, tol=1e-6, out_file='data/random_walk_wr_results.txt'):
+def RANDOM_WALK_WITH_RESTART(network_file, seed_file, r, score_thr=0.4, tol=1e-6, out_file='data/results/random_walk_wr_results.txt'):
     """
     Implementation of the Random Walk With Restart algorithm described in Walking the Interactome
     for Prioritization of Candidate Disease Genes, Sebastian Kohler et al.,
@@ -503,13 +529,13 @@ def read_input(network_file, seed_file):
     return G, seed_genes
 
 
-def random_walk_wr(G:nx.Graph, seed_genes, r, score_thr, tol):
+def random_walk_wr(G:nx.Graph, seed_genes, r, score_thr, tol, sorted_nodes_only=False):
     """
     Core routine for the Random Walk With Restart algorithm.
 
     :param G: interactome graph
     :param seed_genes: disease genes restricted to the interactome
-    :param r: probability of restarting
+    :param r: probability of restarting; default value 0.7
     :param score_thr: probability threshold under which truncate the output rank
     :param tol: tolerance threshold for convergence; in the ref. paper set to 1e-6
 
@@ -537,13 +563,27 @@ def random_walk_wr(G:nx.Graph, seed_genes, r, score_thr, tol):
     pt_1 = pt_1[pt_1 >= score_thr]
     
     sorted_idxs = np.argsort(pt_1)[::-1]
-    sorted_nodes = [index_to_node[i] for i in sorted_idxs]
+    sorted_nodes = [index_to_node[i] for i in sorted_idxs if index_to_node[i] not in seed_genes]
+
+    if sorted_nodes_only:
+        return sorted_nodes
+
     rank = list( zip(range(1,len(sorted_nodes)+1), sorted_nodes, pt_1[sorted_idxs]) )
 
     return rank
 
 
-def k_fold(func, metric_func, k=10, **kwargs):
+def get_extended_val(extended_disease_file, disease, extended_val=False):
+    """
+    """
+    if extended_val:
+        ext_df = pd.read_csv(extended_disease_file, sep='\t')
+        ext_set = set(ext_df[ext_df['diseaseId'].str.contains(disease)]['geneId'].astype(str))
+        return ext_set, set()
+    return None,None
+
+
+def k_fold(func, metric_func, k=5, extended_val=False, **kwargs):
     """
     """
     # network_file, seed_file
@@ -557,60 +597,133 @@ def k_fold(func, metric_func, k=10, **kwargs):
     disease_genes = np.array(list(seed_genes & all_genes_in_network))
     n = len(disease_genes)
 
-    kfolds = KFold(n_splits=k, shuffle=True) 
+    kfolds = KFold(n_splits=k, shuffle=True, random_state=1960500) 
 
     metrics = defaultdict(list)
+
+    ext_disease, extended_val_set = get_extended_val(kwargs['extended_disease_file'], kwargs['disease'], extended_val)
 
     for train_idx, test_idx in kfolds.split(disease_genes):
         out = np.array(func(G, disease_genes[train_idx], **kwargs['func_args']))
         gt = disease_genes[test_idx]
+
+        if extended_val:
+            fp = set(iter(out[:n])) - set(iter(gt))
+            fp_in_ext = fp & ext_disease
+            extended_val_set |= fp_in_ext
+            gt = np.concatenate([gt, np.array(list(fp_in_ext))])
+
         metrics_current_split = metric_func(out, gt, n)
         for key in metrics_current_split.keys():
             metrics[key].append(metrics_current_split[key])
     
     for metric, values in metrics.items():
-        metrics[metric] = (np.average(values), np.std(values))
+        metrics[metric] = (np.round(np.average(values), 5), np.round(np.std(values), 5))
+
+    if extended_val:
+        metrics['extended_val'] = list(extended_val_set)
+
+    if os.path.exists('./data/results/kfold_tmp.txt'):
+        os.remove('./data/results/kfold_tmp.txt')
+
+    if 'metrics_file' in kwargs:
+        with open(kwargs['metrics_file'], 'w') as metrics_file:
+            json.dump(metrics, metrics_file, indent=4)
 
     return metrics
 
 
-def k_fold_MCL(human_file, seed_file,  metric_func, k=10, inflation=1.8):
+def k_fold_MCL(human_file, network_file, metric_func, extended_disease_file, metrics_file, k=10, inflation=1.8, disease='C0003873',
+               extended_validation=False):
     """
     """
 
+    # network_file, seed_file
+    network_file = network_file
+    seed_file = 'data/seeds_'+disease+'.txt'
+    G, seed_genes = read_input(network_file, seed_file)
+    print('Read Data')
+
+    # generate MCL clusters
     clusters = MCL(human_file=human_file, inflation=inflation)
-    seeds = pd.read_csv(seed_file, header=None, dtype=str).iloc[:,0].tolist()
+    print('Clusters generated')
+
+    # throwing away the seed genes that are not in the network
+    all_genes_in_network = set(G.nodes())
+    seed_genes = set(seed_genes)
+    disease_genes = np.array(list(seed_genes & all_genes_in_network))
 
     kfolds = KFold(n_splits=k, shuffle=True) 
-    n = len(seeds)
 
     metrics = defaultdict(list)
 
-    for train_idx, test_idx in kfolds.split(seeds):
-        train_genes = [int(seeds[i]) for i in train_idx]
+    print('Starting k-fold')
+    for train_idx, test_idx in kfolds.split(disease_genes):
+        train_genes = [int(disease_genes[i]) for i in train_idx]
         out = enriched_cluster(human_file=human_file, 
                             clusters=clusters, 
                             train_genes=train_genes)
-        gt = [int(seeds[i]) for i in test_idx]
-        metrics_current_split = metric_func(out, gt, n)
+        gt = [int(disease_genes[i]) for i in test_idx]
+
+        if extended_validation:
+            ext_disease, extended_val_set = get_extended_val(extended_disease_file, disease, extended_validation)
+            fp = set(iter(out)) - set(iter(gt))
+            fp_in_ext = fp & ext_disease
+            extended_val_set |= fp_in_ext
+            gt = np.concatenate([gt, np.array(list(fp_in_ext))])
+
+        metrics_current_split = metric_func(out, gt)
         for key in metrics_current_split.keys():
             metrics[key].append(metrics_current_split[key])
+
+    print('KFold Done')
     
     for metric, values in metrics.items():
         metrics[metric] = (np.average(values), np.std(values))
 
+    if extended_validation:
+        metrics['extended_val'] = list(extended_val_set)
+
+    if os.path.exists('./data/results/kfold_tmp.txt'):
+        os.remove('./data/results/kfold_tmp.txt')
+
+    if metrics_file:
+        with open(metrics_file, 'w') as metrics_file:
+            json.dump(metrics, metrics_file, indent=4)
+
     return metrics
 
 
-def k_fold_diffusion_heat(dict_res, metric_func, n=174, disease='C0003873'):
+def k_fold_diffusion_heat(network_file, dict_res, metric_func, extended_disease_file, metrics_file, disease='C0003873', 
+                          extended_validation=False):
     """
     """
+
+    # network_file, seed_file
+    seed_file = 'data/seeds_'+disease+'.txt'
+    G, seed_genes = read_input(network_file, seed_file)
+
+    # throwing away the seed genes that are not in the network
+    all_genes_in_network = set(G.nodes())
+    seed_genes = set(seed_genes)
+    disease_genes = np.array(list(seed_genes & all_genes_in_network))
+    n = len(disease_genes)
 
     metrics = defaultdict(list)
 
     for key, value in dict_res.items():
+        if len(value) == 0:
+            continue
         out = value
         gt = pd.read_csv('diffusion_heat/'+disease+'/seed'+key+'val.txt', header=None, dtype=str).iloc[:,0].tolist()
+        gt = list(map(int, gt))
+
+        if extended_validation:
+            ext_disease, extended_val_set = get_extended_val(extended_disease_file, disease, extended_validation)
+            fp = set(iter(out[:n])) - set(iter(gt))
+            fp_in_ext = fp & ext_disease
+            extended_val_set |= fp_in_ext
+            gt = np.concatenate([gt, np.array(list(fp_in_ext))])
 
         metrics_current_split = metric_func(out, gt, n)
         for key in metrics_current_split.keys():
@@ -619,14 +732,23 @@ def k_fold_diffusion_heat(dict_res, metric_func, n=174, disease='C0003873'):
     for metric, values in metrics.items():
         metrics[metric] = (np.average(values), np.std(values))
 
-    return metrics
+    if extended_validation:
+        metrics['extended_val'] = list(extended_val_set)
 
+    if os.path.exists('./data/results/kfold_tmp.txt'):
+        os.remove('./data/results/kfold_tmp.txt')
+
+    if metrics_file:
+        with open(metrics_file, 'w') as metrics_file:
+            json.dump(metrics, metrics_file, indent=4)
+
+    return metrics
 
 
 def precision(pred:np.array, gt:np.array):
     """
     """
-    rank_len = np.minimum(len(pred), len(gt))
+    rank_len = len(pred)
     tp_len = len(set(iter(pred)) & set(iter(gt)))
     return tp_len / rank_len
 
@@ -636,10 +758,9 @@ def recall(pred:np.array, gt:np.array):
     prediction: np.array
     ground_truth: np.array
     """
+    gt_len = len(gt)
     tp = len(set(iter(pred)).intersection(set(iter(gt))))
-    fn = len(set(iter(gt)).difference(set(iter(pred))))
-
-    return tp / (tp+fn)
+    return tp / gt_len
 
 
 def ndcg(pred:np.array, gt:np.array):
@@ -661,7 +782,22 @@ def compute_metrics(pred, gt, n):
     for X in top_pos:
         metrics[f'precision_at_{X}'] = p = precision(pred[:X], gt)
         metrics[f'recall_at_{X}'] = r = recall(pred[:X], gt)
-        metrics[f'ndcg_at_k_{X}'] = ndcg(pred[:X], gt)
-        metrics[f'F1-score_at_{X}'] = np.nan_to_num(2 * (p * r) / (p + r))
+        metrics[f'ndcg_at_{X}'] = ndcg(pred[:X], gt)
+        metrics[f'F1-score_at_{X}'] = 0 if (p+r) == 0 else 2 * (p*r) / (p+r)
+
+    return metrics
+
+def compute_metrics_MCL(pred, gt):
+    """
+    """
+    metrics = {}
+
+    tp = len(set(pred).intersection(set(gt)))
+    fp = len(set(pred).difference(set(gt)))
+    fn = len(set(gt).difference(set(pred)))
+
+    metrics[f'precision'] = p = 0 if tp+fp == 0 else tp / (tp + fp)
+    metrics[f'recall'] = r = 0 if tp+fn == 0 else tp / (tp + fn)
+    metrics[f'F1-score'] = 0 if p+r == 0 else 2 * (p * r) / (p + r)
 
     return metrics
