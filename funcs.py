@@ -12,6 +12,7 @@ from sklearn.preprocessing import normalize
 from sklearn.model_selection import KFold
 from scipy.stats import hypergeom
 import csv
+import json
 
 
 def tsv_to_txt(tsv_file, txt_file):
@@ -71,6 +72,11 @@ def human_data(file='data/BIOGRID-ORGANISM-Homo_sapiens-4.4.204.tab3.txt',
     our_df = our_df[['A', 'B']]
     our_df.to_csv(save_file, sep='\t', index=False)
 
+def generate_PPI(in_file, out_file):
+    """
+    """
+    df = pd.read_csv(in_file, sep='\t')
+    df.to_csv(out_file, sep=',', header=False, index=False)
 
 def disease_data(file='data/curated_gene_disease_associations.tsv',
                  disease_id='C0003873'):
@@ -542,6 +548,14 @@ def random_walk_wr(G:nx.Graph, seed_genes, r, score_thr, tol):
 
     return rank
 
+def get_extended_val(extended_disease_file, disease, extended_val=False):
+    """
+    """
+    if extended_val:
+        ext_df = pd.read_csv(extended_disease_file, sep='\t')
+        ext_set = set(ext_df[ext_df['diseaseId'].str.contains(disease)]['geneId'])
+        return ext_set, set()
+    return None,None
 
 def k_fold(func, metric_func, k=10, **kwargs):
     """
@@ -574,43 +588,97 @@ def k_fold(func, metric_func, k=10, **kwargs):
     return metrics
 
 
-def k_fold_MCL(human_file, seed_file,  metric_func, k=10, inflation=1.8):
+def k_fold_MCL(human_file, network_file, metric_func, extended_disease_file, metrics_file, k=10, inflation=1.8, disease='C0003873',
+               extended_validation=False):
     """
     """
 
+    # network_file, seed_file
+    network_file = network_file
+    seed_file = 'data/seeds_'+disease+'.txt'
+    G, seed_genes = read_input(network_file, seed_file)
+    print('Read Data')
+
+    # generate MCL clusters
     clusters = MCL(human_file=human_file, inflation=inflation)
-    seeds = pd.read_csv(seed_file, header=None, dtype=str).iloc[:,0].tolist()
+    print('Clusters generated')
+
+    # throwing away the seed genes that are not in the network
+    all_genes_in_network = set(G.nodes())
+    seed_genes = set(seed_genes)
+    disease_genes = np.array(list(seed_genes & all_genes_in_network))
 
     kfolds = KFold(n_splits=k, shuffle=True) 
-    n = len(seeds)
 
     metrics = defaultdict(list)
 
-    for train_idx, test_idx in kfolds.split(seeds):
-        train_genes = [int(seeds[i]) for i in train_idx]
+    print('Starting k-fold')
+    for train_idx, test_idx in kfolds.split(disease_genes):
+        train_genes = [int(disease_genes[i]) for i in train_idx]
         out = enriched_cluster(human_file=human_file, 
                             clusters=clusters, 
                             train_genes=train_genes)
-        gt = [int(seeds[i]) for i in test_idx]
-        metrics_current_split = metric_func(out, gt, n)
+        gt = [int(disease_genes[i]) for i in test_idx]
+
+        if extended_validation:
+            ext_disease, extended_val_set = get_extended_val(extended_disease_file, disease, extended_validation)
+            fp = set(iter(out)) - set(iter(gt))
+            fp_in_ext = fp & ext_disease
+            extended_val_set |= fp_in_ext
+            gt = np.concatenate([gt, np.array(list(fp_in_ext))])
+
+        metrics_current_split = metric_func(out, gt)
         for key in metrics_current_split.keys():
             metrics[key].append(metrics_current_split[key])
+
+    print('KFold Done')
     
     for metric, values in metrics.items():
         metrics[metric] = (np.average(values), np.std(values))
 
+    if extended_validation:
+        metrics['extended_val'] = list(extended_val_set)
+
+    if os.path.exists('./data/results/kfold_tmp.txt'):
+        os.remove('./data/results/kfold_tmp.txt')
+
+    if metrics_file:
+        with open(metrics_file, 'w') as metrics_file:
+            json.dump(metrics, metrics_file, indent=4)
+
     return metrics
 
 
-def k_fold_diffusion_heat(dict_res, metric_func, n=174, disease='C0003873'):
+def k_fold_diffusion_heat(network_file, dict_res, metric_func, extended_disease_file, metrics_file, disease='C0003873', 
+                          extended_validation=False):
     """
     """
+
+    # network_file, seed_file
+    seed_file = 'data/seeds_'+disease+'.txt'
+    G, seed_genes = read_input(network_file, seed_file)
+
+    # throwing away the seed genes that are not in the network
+    all_genes_in_network = set(G.nodes())
+    seed_genes = set(seed_genes)
+    disease_genes = np.array(list(seed_genes & all_genes_in_network))
+    n = len(disease_genes)
 
     metrics = defaultdict(list)
 
     for key, value in dict_res.items():
+        if len(value) == 0:
+            continue
         out = value
         gt = pd.read_csv('diffusion_heat/'+disease+'/seed'+key+'val.txt', header=None, dtype=str).iloc[:,0].tolist()
+        gt = list(map(int, gt))
+
+        if extended_validation:
+            ext_disease, extended_val_set = get_extended_val(extended_disease_file, disease, extended_validation)
+            fp = set(iter(out[:n])) - set(iter(gt))
+            fp_in_ext = fp & ext_disease
+            extended_val_set |= fp_in_ext
+            gt = np.concatenate([gt, np.array(list(fp_in_ext))])
 
         metrics_current_split = metric_func(out, gt, n)
         for key in metrics_current_split.keys():
@@ -618,6 +686,16 @@ def k_fold_diffusion_heat(dict_res, metric_func, n=174, disease='C0003873'):
 
     for metric, values in metrics.items():
         metrics[metric] = (np.average(values), np.std(values))
+
+    if extended_validation:
+        metrics['extended_val'] = list(extended_val_set)
+
+    if os.path.exists('./data/results/kfold_tmp.txt'):
+        os.remove('./data/results/kfold_tmp.txt')
+
+    if metrics_file:
+        with open(metrics_file, 'w') as metrics_file:
+            json.dump(metrics, metrics_file, indent=4)
 
     return metrics
 
@@ -626,9 +704,9 @@ def k_fold_diffusion_heat(dict_res, metric_func, n=174, disease='C0003873'):
 def precision(pred:np.array, gt:np.array):
     """
     """
-    rank_len = np.minimum(len(pred), len(gt))
-    tp_len = len(set(iter(pred)) & set(iter(gt)))
-    return tp_len / rank_len
+    tp = len(set(pred).intersection(set(gt)))
+    fp = len(set(pred).difference(set(gt)))
+    return tp / (tp+fp)
 
 
 def recall(pred:np.array, gt:np.array):
@@ -662,6 +740,22 @@ def compute_metrics(pred, gt, n):
         metrics[f'precision_at_{X}'] = p = precision(pred[:X], gt)
         metrics[f'recall_at_{X}'] = r = recall(pred[:X], gt)
         metrics[f'ndcg_at_k_{X}'] = ndcg(pred[:X], gt)
-        metrics[f'F1-score_at_{X}'] = np.nan_to_num(2 * (p * r) / (p + r))
+        metrics[f'F1-score_at_{X}'] = 0 if p+r == 0 else 2 * (p * r) / (p + r)
+
+    return metrics
+
+
+def compute_metrics_MCL(pred, gt):
+    """
+    """
+    metrics = {}
+
+    tp = len(set(pred).intersection(set(gt)))
+    fp = len(set(pred).difference(set(gt)))
+    fn = len(set(gt).difference(set(pred)))
+
+    metrics[f'precision'] = p = 0 if tp+fp == 0 else tp / (tp + fp)
+    metrics[f'recall'] = r = 0 if tp+fn == 0 else tp / (tp + fn)
+    metrics[f'F1-score'] = 0 if p+r == 0 else 2 * (p * r) / (p + r)
 
     return metrics
