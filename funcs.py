@@ -1,12 +1,10 @@
 from collections import defaultdict
-from networkx.drawing.layout import _process_params
 import pandas as pd
 import numpy as np
 import networkx as nx
 import markov_clustering as mc
 import os
 import re
-from sklearn.metrics import recall_score, precision_score, f1_score, ndcg_score
 import imported_code.diamond as diamond
 from sklearn.preprocessing import normalize
 from sklearn.model_selection import KFold
@@ -16,7 +14,8 @@ import json
 
 
 def tsv_to_txt(tsv_file, txt_file):
-  
+    """
+    """
     # Open tsv and txt files(open txt file in write mode)
     tsv_file = open(tsv_file)
     txt_file = open(txt_file, "w")
@@ -48,6 +47,8 @@ def check_issue(file='data/BIOGRID-ORGANISM-Homo_sapiens-4.4.204.tab3.txt'):
 
 def human_data(file='data/BIOGRID-ORGANISM-Homo_sapiens-4.4.204.tab3.txt',
                save_file='data/homo_preprocess.tsv', correct=True):
+    """
+    """
     df = pd.read_csv(file, sep='\t', low_memory=False)
     our_df = df[(df['Experimental System Type'] == 'physical') & 
                 (df['Organism ID Interactor A'] == 9606) & 
@@ -75,6 +76,8 @@ def human_data(file='data/BIOGRID-ORGANISM-Homo_sapiens-4.4.204.tab3.txt',
 
 def disease_data(file='data/curated_gene_disease_associations.tsv',
                  disease_id='C0003873'):
+    """
+    """
     df = pd.read_csv(file, sep='\t')
     curated_df = df[df['diseaseId'].str.contains(disease_id)]
 
@@ -92,6 +95,8 @@ def disease_data(file='data/curated_gene_disease_associations.tsv',
 
 
 def data_overview(human_file, disease_file):
+    """
+    """
     curated_df = pd.read_csv(disease_file, sep='\t')
     interactome_df = pd.read_csv(human_file, sep='\t')
     interactome_g = nx.from_pandas_edgelist(interactome_df, source='A',
@@ -119,6 +124,8 @@ def generate_PPI(in_file, out_file):
 
 
 def MCL_hyper(human_file, start=18, end=27):
+    """
+    """
     interactome_df = pd.read_csv(human_file, sep='\t')
     interactome_g = nx.from_pandas_edgelist(interactome_df, source='A',
                                             target='B')
@@ -131,6 +138,8 @@ def MCL_hyper(human_file, start=18, end=27):
 
 
 def MCL(human_file, inflation=1.8):
+    """
+    """
     interactome_df = pd.read_csv(human_file, sep='\t')
     interactome_g = nx.from_pandas_edgelist(interactome_df, source='A',
                                             target='B')
@@ -165,6 +174,8 @@ def enriched_cluster(human_file, clusters, train_genes):
 
 
 def split_files_diffusion_heat(seeds='data/seed.txt', disease='C0003873', k=10):
+    """
+    """
 
     with open(seeds, 'r') as f:
         myNames = [line.strip() for line in f]
@@ -184,6 +195,8 @@ def split_files_diffusion_heat(seeds='data/seed.txt', disease='C0003873', k=10):
     
 
 def diffusion_heat(path='diffusion_heat/'):
+    """
+    """
 
     dict_ = {}
 
@@ -435,8 +448,9 @@ def DIABLE(network_file, seed_file, n, alpha=1, out_file='data/results/diable_re
     :param n: number of desired iterations
     :param alpha: seeds weight (integer), default value is 1
     :param out_file: name for the results file
+    :param return_list: bool, whether return the ranking of genes
 
-    :return 
+    :return ordered list of genes (optional)
     """
 
     # infer n
@@ -481,7 +495,7 @@ def RANDOM_WALK_WITH_RESTART(network_file, seed_file, r, score_thr=0.4, tol=1e-6
     :param seed_file: disease genes' file
     :param r: probability of restarting
     :param score_thr: probability threshold under which truncate the output rank
-    :param tol: tolerance threshold for convergence
+    :param tol: tolerance threshold for convergence (default 1e-6)
     :param out_file: file in which save the results
 
     :return 
@@ -508,7 +522,6 @@ def RANDOM_WALK_WITH_RESTART(network_file, seed_file, r, score_thr=0.4, tol=1e-6
     with open(out_file, 'w') as fout:
 
         fout.write('\t'.join(['#rank', 'Gene', 'p']) + '\n')
-        rank = 0
         for entry in genes_rank:
             fout.write('\t'.join(map(str, entry)) + '\n')
 
@@ -538,8 +551,10 @@ def random_walk_wr(G:nx.Graph, seed_genes, r, score_thr, tol, sorted_nodes_only=
     :param r: probability of restarting; default value 0.7
     :param score_thr: probability threshold under which truncate the output rank
     :param tol: tolerance threshold for convergence; in the ref. paper set to 1e-6
+    :param sorted_nodes_only: bool, whether return only the ordered list of genes or 
+                              the list of tuples [(#ranking_position, gene, score),...]
 
-    :return genes rank: [(rank, gene, probability), ...]
+    :return ordered list of genes: [gene_1, gene_2, ...] or genes rank: [(rank, gene, probability), ...]
     """
     N = G.number_of_nodes()
     W = normalize(nx.adjacency_matrix(G), norm='l1', axis=0, copy=False)
@@ -575,6 +590,14 @@ def random_walk_wr(G:nx.Graph, seed_genes, r, score_thr, tol, sorted_nodes_only=
 
 def get_extended_val(extended_disease_file, disease, extended_val=False):
     """
+    Get the set of genes in the extended_disease_file if extended_val=True, 
+    do nothing otherwise.
+
+    :param extended_disease_file: file containing the additional disease genes
+    :param disease: disease ID according to which filter the genes
+    :param extended_val: whether return the addtional genes for the disease or not
+
+    :return (addotional genes, set()) or (None, None)
     """
     if extended_val:
         ext_df = pd.read_csv(extended_disease_file, sep='\t')
@@ -585,6 +608,23 @@ def get_extended_val(extended_disease_file, disease, extended_val=False):
 
 def k_fold(func, metric_func, k=5, extended_val=False, **kwargs):
     """
+    Perform the k-fold given the algorithm to test (func) and the metrics (metric_func).
+    This function works with all the algorithms which return a ranking of genes.
+
+    :param func: the function implementing the algorithm for which perform k-fold cross validation
+    :param metric_func: function for scoring the algorithm and evaluate its performance
+    :param k: number of folds
+    :param extended_val: whether performing the extended validation step or not
+    :param **kwargs: 
+                    - newtwork_file: file path to the interactome file
+                    - seed_file: file path to the disease genes file
+                    - extended_disease_file: file path to the extended disease genes file (used only if extended_val=True)
+                    - disease: disease ID
+                    - func_args: dictionary of additional parameters for the function func
+                    - metrics_file: file path for saving the computed metrics in JSON format
+
+    :return dictionary of computed metrics
+
     """
     # network_file, seed_file
     network_file = kwargs['network_file']
@@ -636,6 +676,19 @@ def k_fold(func, metric_func, k=5, extended_val=False, **kwargs):
 def k_fold_MCL(human_file, network_file, metric_func, extended_disease_file, metrics_file, k=10, inflation=1.8, disease='C0003873',
                extended_validation=False):
     """
+    Perform the k-fold for the MCL algorithm given the metrics (metric_func).
+    
+    :param human_file: interactome file
+    :param network_file: PPI file
+    :param metric_func: function to compute the metrics
+    :param extedned_disease_file: file path to the extended disease genes file
+    :param metrics_file: file path for saving the computed metrics in JSON format
+    :param k: number of folds
+    :param inflation: inflation parameter of MCL algorithm
+    :param disease: disease ID
+    :param extended_validation: whether performing the extended validation step or not
+
+    :return dictionary of computed metrics
     """
 
     # network_file, seed_file
@@ -697,6 +750,17 @@ def k_fold_MCL(human_file, network_file, metric_func, extended_disease_file, met
 def k_fold_diffusion_heat(network_file, dict_res, metric_func, extended_disease_file, metrics_file, disease='C0003873', 
                           extended_validation=False):
     """
+    Perform the k-fold for the Diffusion Heat algorithm given the metrics (metric_func).
+    
+    :param network_file: PPI file
+    :param dict_res: dictionary of the results of the Diffusion Heat algorithm computed through Cythoscape
+    :param metric_func: function to compute the metrics
+    :param extedned_disease_file: file path to the extended disease genes file
+    :param metrics_file: file path for saving the computed metrics in JSON format
+    :param disease: disease ID
+    :param extended_validation: whether performing  the extended validation step or not
+
+    :return dictionary of computed metrics
     """
 
     # network_file, seed_file
@@ -747,6 +811,12 @@ def k_fold_diffusion_heat(network_file, dict_res, metric_func, extended_disease_
 
 def precision(pred:np.array, gt:np.array):
     """
+    Compute the precision.
+
+    :param pred: target algorithm's output
+    :param gt: ground truth
+
+    :return TP/(TP+FP)
     """
     rank_len = len(pred)
     tp_len = len(set(iter(pred)) & set(iter(gt)))
@@ -755,8 +825,12 @@ def precision(pred:np.array, gt:np.array):
 
 def recall(pred:np.array, gt:np.array):
     """
-    prediction: np.array
-    ground_truth: np.array
+    Compute the recall.
+
+    :param pred: target algorithm's output
+    :param gt: ground truth
+
+    :return TP/(TP+FN)
     """
     gt_len = len(gt)
     tp = len(set(iter(pred)).intersection(set(iter(gt))))
@@ -765,6 +839,12 @@ def recall(pred:np.array, gt:np.array):
 
 def ndcg(pred:np.array, gt:np.array):
     """
+    Compute the Normalized Discounted Cumulative Gain.
+
+    :param pred: target algorithm's output
+    :param gt: ground truth
+
+    :return DCG/IDCG
     """
     p = np.minimum(len(pred), len(gt))
     idcg = np.sum(1 / np.log2(np.arange(2, p+2))) # i + 1
@@ -775,6 +855,13 @@ def ndcg(pred:np.array, gt:np.array):
 
 def compute_metrics(pred, gt, n):
     """
+    Compute the metrics {Precision, Recall, F1-score, NDCG} @ {50, n//2, n//4, n//10}
+
+    :param pred: target algorithm's output
+    :param gt: ground truth
+    :param n: number of genes in the ground truth
+
+    :return dictionary of computed metrics
     """
     top_pos = (50, n//10, n//4, n//2, n)
     metrics = {}
@@ -787,8 +874,15 @@ def compute_metrics(pred, gt, n):
 
     return metrics
 
+
 def compute_metrics_MCL(pred, gt):
     """
+    Compute the metrics {Precision, Recall, F1-score} for MCL.
+
+    :param pred: target algorithm's output
+    :param gt: ground truth
+
+    :return dictionary of computed metrics
     """
     metrics = {}
 
@@ -801,3 +895,227 @@ def compute_metrics_MCL(pred, gt):
     metrics[f'F1-score'] = 0 if p+r == 0 else 2 * (p * r) / (p + r)
 
     return metrics
+
+
+# #######################################################
+# #
+# # Visualization
+# #
+# #######################################################
+
+def prepare_results_for_latex(results_file, col=None):
+    """
+    Prepare the results of an algorithm for a disease for the LaTeX visualization. 
+    Return the results as strings average_value ± standard_deviation.
+
+    :param results_file: file path to the metric results file for an algorithm on a specific disease
+    :param col: only for compatibility
+
+    :return pd.DataFrame of well formatted results
+    """
+    alg_name_regx = re.compile('(?<=metrics_)[^_ext](.+)(?=_)|(?<=ext_)(.+)(?=_)')
+    alg_name = re.search(alg_name_regx, results_file).group(0).upper()
+    results = pd.read_json(results_file, orient='index').set_axis(['avg', 'std'], axis=1)
+    if 'extended_val' in results.index:
+        results.drop(['extended_val'], axis=0, inplace=True)
+    results[alg_name] = (results['avg'] * 100).round(decimals=2).astype('str') + '±' + (results['std'] * 100).round(decimals=2).astype('str')
+    results.drop(['avg', 'std'], axis=1, inplace=True)
+    results.index = results.index.str.replace(re.compile('(_at(_k)?_)'), '@').str.capitalize()
+    results.index = results.index.str.split('@', expand=True)
+    results.index.rename(['Metric', '@'], inplace=True)
+    results.reset_index(inplace=True)
+    results['@'] = results['@'].astype(int)
+    results.sort_values(['@', 'Metric'], inplace=True)
+    results.set_index(['@', 'Metric'], inplace=True)
+    return results
+
+
+def prepare_results_for_summary(results_file, col='avg'):
+    """
+    Prepare the results of an algorithm for a disease for the plot visualization.
+
+    :param results_file: file path to the metric results file for an algorithm on a specific disease
+    :param col: result to return (average or standard deviation)
+
+    :return pd.DataFrame of well formatted results
+    """
+    alg_name_regx = re.compile('(?<=metrics_)[^_ext](.+)(?=_)|(?<=ext_)(.+)(?=_)')
+    alg_name = re.search(alg_name_regx, results_file).group(0).upper()
+    results = pd.read_json(results_file, orient='index').set_axis(['avg', 'std'], axis=1)
+    if 'extended_val' in results.index:
+        results.drop(['extended_val'], axis=0, inplace=True)
+    results[alg_name] = (results[col] * 100).round(decimals=2)
+    results.drop(['avg', 'std'], axis=1, inplace=True)
+    results.index = results.index.str.replace(re.compile('(_at(_k)?_)'), '@').str.capitalize()
+    results.index = results.index.str.split('@', expand=True)
+    results.index.rename(['Metric', '@'], inplace=True)
+    results.reset_index(inplace=True)
+    results['@'] = results['@'].astype(int)
+    results.sort_values(['@', 'Metric'], inplace=True)
+    results.set_index(['@', 'Metric'], inplace=True)
+    return results
+
+
+def join_results(results_files, func=prepare_results_for_latex, col='avg'):
+    """
+    Join results from different files into a pd.DataFrame, processing the results according to
+    the function func.
+
+    :param results_files: list of file paths ot the results
+    :param func: function according to read and format the results
+    :param col: wheter return the averages (avg) or the standard deviations (std)
+
+    :return pd.DataFrame of joint results
+    """
+    results_list = []
+    for results_file in results_files:
+        results = func(results_file, col)
+        results_list.append(results)
+    return pd.concat(results_list, axis=1, join='inner')
+
+
+def print_latex(results):
+    """
+    Print the results into a LaTeX formatted string.
+
+    :param results: list of file paths to the results or pd.DataFrame
+
+    :return LaTeX string
+    """
+    if not isinstance(results, pd.DataFrame):
+        results = join_results(results, prepare_results_for_latex)
+    header = [r'\textbf{Diff. Heat}', r'\textbf{RW WR}', 
+              r'\textbf{Diamond}', r'\textbf{Diable}', r'\textbf{E.Diff. Heat}', r'\textbf{E.RW WR}', 
+              r'\textbf{E.Diamond}', r'\textbf{E.Diable}']
+    results.columns = header
+    results.index = results.index.set_levels(results.index.levels[2].str.replace('Ndcg', 'NDCG').str.replace('-score', '') \
+                                    .str.replace('Precision', 'P').str.replace('Recall', 'R'), level=2)
+    latex = results.to_latex('data/results/longtable.tex', bold_rows=True, escape=False, multicolumn=True, multirow=True, longtable=True)
+    return latex
+
+
+def get_avg_std_res(diseases, normal_extended=(True, False)):
+    """
+    Get the average and standard deviation of the results.
+
+    :param diseases: list of diseases for which return the joint DataFrame
+    :param normal_extended: boolean tuple; whether return only the normal results (True, False), 
+                            only the extended results (False, True) or both (True, True)
+    
+    :return (pd.DataFrame of averages, pd.DataFrame of standard devs)
+    """
+    df_avg_list = []
+    df_std_list = []
+
+    algorithms = ['heat','r_walk', 'diamond', 'diable']
+    for disease in diseases:
+        if normal_extended[0] and normal_extended[1]:
+            results_files = [f'data/results/{disease}/metrics_{algorithm}_{disease}.json' for algorithm in algorithms]
+            results_files += [f'data/results/extended/metrics_ext_{algorithm}_{disease}.json' for algorithm in algorithms]
+        elif normal_extended[0]:
+            results_files = [f'data/results/{disease}/metrics_{algorithm}_{disease}.json' for algorithm in algorithms]
+        elif normal_extended[1]:
+            results_files = [f'data/results/extended/metrics_ext_{algorithm}_{disease}.json' for algorithm in algorithms]
+        else:
+            raise NotImplementedError
+        df_avg_list.append(join_results(results_files, func=prepare_results_for_summary, col='avg').reset_index())
+        df_std_list.append(join_results(results_files, func=prepare_results_for_summary, col='std').reset_index())
+
+    df_avg = pd.concat(df_avg_list, ignore_index=True)
+    df_std = pd.concat(df_std_list, ignore_index=True)
+
+    return df_avg, df_std
+
+
+def replace_cutoff_symbol(df):
+    """
+    Given the pd.DataFrame df, replace the cutoff number with the symbol
+
+    :param df: pd.DataFrame of results
+
+    :return pd.DataFrame
+    """
+    symbols = {
+        '17':'n/10', '43':'n/4', '86':'n/2', '173':'n', # C0003873
+        '32':'n/10', '80':'n/4', '160':'n/2', '321':'n', # C0019193
+        '61':'n/10', '153':'n/4', '306':'n/2', '613':'n', # C0033578
+        '13':'n/10', '33':'n/4', '66':'n/2', '133':'n', # C0919267
+        '34':'n/4', '69':'n/2', '139':'n' # C0917816
+    }
+    df['@'] = df['@'].astype(str)
+    df = df.replace({'@':symbols})
+
+    return df
+
+
+def aggregate_results(df_avg, df_std, how='str'):
+    """
+    Aggregate the results for string visualization (str), summarization (mean) or plotting (+-std).
+
+    :param df_avg: pd.DataFrame of averages
+    :param df_std: pd.DataFrame of standard deviations
+    :param how: how to aggregate the results
+
+    :return aggregated pd.DataFrame 
+    """
+    algorithms = ['HEAT','R_WALK', 'DIAMOND', 'DIABLE']
+    df = df_avg.copy().set_index(['@', 'Metric'])
+    if how == 'str':
+        for algorithm in algorithms:
+            df[algorithm] = df_avg.groupby(['@', 'Metric']).mean()[algorithm].round(decimals=2).astype('str') + '±' + df_std.groupby(['@', 'Metric']).mean()[algorithm].round(decimals=2).astype('str')
+    elif how == 'mean':
+        for algorithm in algorithms:
+            df[f'{algorithm}_avg'] = df_avg.groupby(['@', 'Metric']).mean()[algorithm].round(decimals=2)
+            df[f'{algorithm}_std'] = df_std.groupby(['@', 'Metric']).mean()[algorithm].round(decimals=2)
+            df.drop(algorithm, axis=1, inplace=True)
+    elif how == '+-std':
+        df_list = []
+        for algorithm in algorithms:
+            df_diff = (df_avg.set_index(['@', 'Metric'])[[algorithm]] - df_std.set_index(['@', 'Metric'])[[algorithm]])
+            df_sum = (df_avg.set_index(['@', 'Metric'])[[algorithm]] + df_std.set_index(['@', 'Metric'])[[algorithm]])
+            df_list.append(pd.concat([df_diff, df_sum]))
+        df = pd.concat(df_list, axis=1)
+    else:
+        raise NotImplementedError
+    return df
+
+
+def plot_res(df, suffix='', drop_index=False, metrics=None):
+    """
+    Plot the results in df in a bar plot together with the standard deviation.
+
+    :param df: results to plot
+    :param suffix: suffix to the algorithm name (if present)
+    :param drop_index: keep the index of the DataFrame or not
+    :param metrics: subset of the metrics to plot
+
+    :return plot
+    """
+    algorithms = ['HEAT', 'R_WALK', 'DIAMOND', 'DIABLE']
+    df.reset_index(inplace=True, drop=drop_index)
+    df_list = []
+    for alg in algorithms:
+        new_df = df.copy()
+        new_df['algorithm'] = alg
+        new_df.rename(columns={f'{alg}{suffix}':'values'}, inplace=True)
+        df_list.append(new_df[['@', 'Metric', 'algorithm','values']])
+    df_f = pd.concat(df_list, axis=0, ignore_index=True)
+
+    if metrics is not None:
+        df_f = df_f[df_f['Metric'].isin(metrics)]
+
+    # plot
+    sns.set_theme()
+    sns.set_context('paper', font_scale=2)
+
+    g = sns.catplot(
+        data=df_f, kind='bar',
+        x='@', y='values', hue='algorithm', col='Metric',
+        ci='sd', palette='deep', alpha=.6, height=6
+    )   
+
+    g.set_axis_labels('@', 'Metric\'s values (%)')
+    g.set(ylim=(0,None))
+    g.legend.set_title('Algorithms')
+    g.despine(trim=True)
+    return g
